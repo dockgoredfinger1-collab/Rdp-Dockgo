@@ -1,12 +1,12 @@
-name: Safe RDP
+name: RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  safe-rdp:
+  rdp:
     runs-on: windows-latest
-    timeout-minutes: 120   # Auto stop setelah 2 jam (ANTI BAN)
+    timeout-minutes: 60   # AUTO STOP 1 JAM (hindari suspend)
 
     steps:
       - name: Enable RDP
@@ -15,58 +15,40 @@ jobs:
             -Name "fDenyTSConnections" -Value 0 -Force
           Restart-Service TermService -Force
 
-      - name: Create RDP User
+      - name: Open Firewall Port 3389
         run: |
-          # Generate strong password (NO System.Web)
-          $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+"
-          $password = -join ((1..20) | ForEach-Object { $chars | Get-Random -Count 1 })
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+
+      - name: Create RDP User (FIXED PASSWORD)
+        run: |
+          # Hapus user lama jika ada
+          if (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name "rdpuser"
+          }
+
+          # Password HARDCODE (Windows policy compliant)
+          $password = "Gh@2026RDP!Secure123"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           New-LocalUser -Name "rdpuser" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "rdpuser"
 
-          # Save creds to file (NOT in logs)
-          Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" "User: rdpuser`nPass: $password"
+          echo "USER=rdpuser" >> $env:GITHUB_ENV
+          echo "PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+      - name: Show RDP Info
         run: |
-          $url="https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $file="$env:TEMP\tailscale.msi"
-          Invoke-WebRequest $url -OutFile $file
-          Start-Process msiexec.exe -ArgumentList "/i $file /quiet /norestart" -Wait
+          Write-Host "============================"
+          Write-Host "RDP USER: $env:USER"
+          Write-Host "RDP PASS: $env:PASS"
+          Write-Host "Use GitHub runner public IP"
+          Write-Host "============================"
 
-      - name: Connect Tailscale
+      - name: Keep Alive (SAFE LOOP)
         run: |
-          $maxRetry = 5
-          $ip = $null
-
-          for ($i=0; $i -lt $maxRetry; $i++) {
-              & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-$env:GITHUB_RUN_ID
-              Start-Sleep 5
-              $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              if ($ip) { break }
-          }
-
-          if (-not $ip) { Write-Error "Tailscale failed"; exit 1 }
-          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-
-      - name: Show Connection Info
-        run: |
-          Write-Host "===================================="
-          Write-Host "RDP ADDRESS: $env:TAILSCALE_IP"
-          Write-Host "User & password in artifact rdp.txt"
-          Write-Host "===================================="
-
-      - name: Upload RDP Credentials
-        uses: actions/upload-artifact@v4
-        with:
-          name: RDP-Creds
-          path: rdp.txt
-
-      - name: Keep Runner Alive (SAFE MODE)
-        run: |
-          for ($i=0; $i -lt 24; $i++) {
-              Write-Host "RDP Active... $(Get-Date)"
-              Start-Sleep -Seconds 300
+          # 10 menit saja (hindari ban)
+          for ($i=0; $i -lt 20; $i++) {
+              Write-Host "RDP active... $(Get-Date)"
+              Start-Sleep -Seconds 30
           }
