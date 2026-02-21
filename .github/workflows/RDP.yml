@@ -1,47 +1,60 @@
-name: Windows RDP
+name: Windows RDP with Tailscale
 
 on: [workflow_dispatch]
 
 jobs:
-  build:
+  rdp:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 360  # Max 6 jam, aman
 
     steps:
-    - name: Enable RDP
-      run: |
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+      - name: Enable RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Restart-Service TermService -Force
 
-    - name: Create RDP User
-      run: |
-        $password = "P@ssw0rd123!"
-        net user rdpuser $password /add
-        net localgroup administrators rdpuser /add
-        echo "USERNAME: rdpuser" > info.txt
-        echo "PASSWORD: $password" >> info.txt
+      - name: Create RDP User
+        run: |
+          # Hapus user lama jika ada
+          if (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name "rdpuser"
+          }
+          $password = "Gh@2026RDP!Secure123"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "rdpuser" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "rdpuser"
+          echo "USERNAME=rdpuser" >> $env:GITHUB_ENV
+          echo "PASSWORD=$password" >> $env:GITHUB_ENV
+          Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" "User: rdpuser`nPass: $password"
 
-    - name: Install Tailscale
-      run: |
-        iwr https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile tailscale.exe
-        .\tailscale.exe /silent
+      - name: Install Tailscale
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-full-1.90.9.exe"
+          $output = "$env:TEMP\tailscale.exe"
+          Invoke-WebRequest -Uri $url -OutFile $output
+          Start-Process -FilePath $output -ArgumentList "/S" -Wait
 
-    - name: Start Tailscale
-      env:
-        TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
-      run: |
-        "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --hostname=github-rdp
+      - name: Connect Tailscale
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --hostname=github-rdp
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "RDP READY!"
+          Write-Host "IP (Tailscale): $ip"
+          Write-Host "User: rdpuser"
+          Write-Host "Pass: Gh@2026RDP!Secure123"
 
-    - name: Show IP
-      run: |
-        "C:\Program Files\Tailscale\tailscale.exe" ip
+      - name: Upload Credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-info
+          path: rdp.txt
 
-    - name: Upload Info
-      uses: actions/upload-artifact@v4
-      with:
-        name: rdp-info
-        path: info.txt
-
-    - name: Keep Alive
-      run: |
-        while ($true) { Start-Sleep -Seconds 600 }
+      - name: Keep Runner Alive
+        run: |
+          while ($true) { Start-Sleep -Seconds 300 }
