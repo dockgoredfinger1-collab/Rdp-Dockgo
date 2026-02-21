@@ -1,4 +1,4 @@
-name: Windows RDP via Ngrok
+name: RDP via Ngrok
 
 on:
   workflow_dispatch:
@@ -42,13 +42,25 @@ jobs:
 
       - name: Start Ngrok TCP Tunnel
         run: |
+          # Jalankan ngrok TCP di background
           Start-Process -NoNewWindow -FilePath "$env:ProgramFiles\ngrok.exe" -ArgumentList "tcp 3389" 
+
+          # Tunggu 10 detik agar tunnel siap
           Start-Sleep -Seconds 10
-          $log = & "$env:ProgramFiles\ngrok.exe" http 404 2>&1
-          Write-Host "Ngrok should be running"
+
+          # Ambil host:port dari API ngrok lokal
+          $api = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
+          $tcpTunnel = $api.tunnels | Where-Object { $_.proto -eq "tcp" }
+          $hostport = $tcpTunnel.public_url.Replace("tcp://","")
+          Write-Host "Ngrok TCP Host:Port -> $hostport"
+          Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" ("HostPort: " + $hostport) -Append
 
       - name: Upload RDP Info
         uses: actions/upload-artifact@v4
         with:
           name: rdp-info
           path: rdp.txt
+
+      - name: Keep Runner Alive
+        run: |
+          while ($true) { Start-Sleep -Seconds 300 }
