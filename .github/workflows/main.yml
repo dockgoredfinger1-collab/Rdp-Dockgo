@@ -6,26 +6,27 @@ on:
 jobs:
   safe-rdp:
     runs-on: windows-latest
-    timeout-minutes: 120   # auto stop setelah 2 jam
+    timeout-minutes: 120   # Auto stop setelah 2 jam (ANTI BAN)
 
     steps:
-      - name: Enable RDP Securely
+      - name: Enable RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
             -Name "fDenyTSConnections" -Value 0 -Force
           Restart-Service TermService -Force
 
-      - name: Create Temporary RDP User
+      - name: Create RDP User
         run: |
-          Add-Type -AssemblyName System.Web
-          $password = [System.Web.Security.Membership]::GeneratePassword(18,3)
+          # Generate strong password (NO System.Web)
+          $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+"
+          $password = -join ((1..20) | ForEach-Object { $chars | Get-Random -Count 1 })
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           New-LocalUser -Name "rdpuser" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "rdpuser"
 
-          # Save creds to file only (not logs)
+          # Save creds to file (NOT in logs)
           Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" "User: rdpuser`nPass: $password"
 
       - name: Install Tailscale
@@ -35,9 +36,11 @@ jobs:
           Invoke-WebRequest $url -OutFile $file
           Start-Process msiexec.exe -ArgumentList "/i $file /quiet /norestart" -Wait
 
-      - name: Connect Tailscale (Auto Retry)
+      - name: Connect Tailscale
         run: |
           $maxRetry = 5
+          $ip = $null
+
           for ($i=0; $i -lt $maxRetry; $i++) {
               & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-$env:GITHUB_RUN_ID
               Start-Sleep 5
@@ -50,19 +53,20 @@ jobs:
 
       - name: Show Connection Info
         run: |
-          Write-Host "RDP Address: $env:TAILSCALE_IP"
-          Write-Host "Credentials saved in rdp.txt artifact"
+          Write-Host "===================================="
+          Write-Host "RDP ADDRESS: $env:TAILSCALE_IP"
+          Write-Host "User & password in artifact rdp.txt"
+          Write-Host "===================================="
 
-      - name: Upload Credentials
+      - name: Upload RDP Credentials
         uses: actions/upload-artifact@v4
         with:
           name: RDP-Creds
           path: rdp.txt
 
-      - name: Keep Alive (SAFE MODE)
+      - name: Keep Runner Alive (SAFE MODE)
         run: |
-          # keep runner alive only limited time (NO infinite)
           for ($i=0; $i -lt 24; $i++) {
-              Write-Host "RDP running... $(Get-Date)"
+              Write-Host "RDP Active... $(Get-Date)"
               Start-Sleep -Seconds 300
           }
