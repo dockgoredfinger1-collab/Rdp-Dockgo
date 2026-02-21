@@ -1,0 +1,68 @@
+name: Safe RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  safe-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 120   # auto stop setelah 2 jam
+
+    steps:
+      - name: Enable RDP Securely
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
+          Restart-Service TermService -Force
+
+      - name: Create Temporary RDP User
+        run: |
+          Add-Type -AssemblyName System.Web
+          $password = [System.Web.Security.Membership]::GeneratePassword(18,3)
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
+          New-LocalUser -Name "rdpuser" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "rdpuser"
+
+          # Save creds to file only (not logs)
+          Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" "User: rdpuser`nPass: $password"
+
+      - name: Install Tailscale
+        run: |
+          $url="https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $file="$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $url -OutFile $file
+          Start-Process msiexec.exe -ArgumentList "/i $file /quiet /norestart" -Wait
+
+      - name: Connect Tailscale (Auto Retry)
+        run: |
+          $maxRetry = 5
+          for ($i=0; $i -lt $maxRetry; $i++) {
+              & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-$env:GITHUB_RUN_ID
+              Start-Sleep 5
+              $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              if ($ip) { break }
+          }
+
+          if (-not $ip) { Write-Error "Tailscale failed"; exit 1 }
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Show Connection Info
+        run: |
+          Write-Host "RDP Address: $env:TAILSCALE_IP"
+          Write-Host "Credentials saved in rdp.txt artifact"
+
+      - name: Upload Credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: RDP-Creds
+          path: rdp.txt
+
+      - name: Keep Alive (SAFE MODE)
+        run: |
+          # keep runner alive only limited time (NO infinite)
+          for ($i=0; $i -lt 24; $i++) {
+              Write-Host "RDP running... $(Get-Date)"
+              Start-Sleep -Seconds 300
+          }
