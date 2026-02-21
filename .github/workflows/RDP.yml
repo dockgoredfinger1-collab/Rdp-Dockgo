@@ -1,0 +1,47 @@
+name: Windows RDP
+
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Enable RDP
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+    - name: Create RDP User
+      run: |
+        $password = "P@ssw0rd123!"
+        net user rdpuser $password /add
+        net localgroup administrators rdpuser /add
+        echo "USERNAME: rdpuser" > info.txt
+        echo "PASSWORD: $password" >> info.txt
+
+    - name: Install Tailscale
+      run: |
+        iwr https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile tailscale.exe
+        .\tailscale.exe /silent
+
+    - name: Start Tailscale
+      env:
+        TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+      run: |
+        "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --hostname=github-rdp
+
+    - name: Show IP
+      run: |
+        "C:\Program Files\Tailscale\tailscale.exe" ip
+
+    - name: Upload Info
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdp-info
+        path: info.txt
+
+    - name: Keep Alive
+      run: |
+        while ($true) { Start-Sleep -Seconds 600 }
