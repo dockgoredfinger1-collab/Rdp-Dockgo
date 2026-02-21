@@ -1,6 +1,7 @@
-name: Windows RDP with Tailscale
+name: Windows RDP via Ngrok
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
 
 jobs:
   rdp:
@@ -25,35 +26,29 @@ jobs:
           New-LocalUser -Name "rdpuser" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "rdpuser"
-          echo "USERNAME=rdpuser" >> $env:GITHUB_ENV
-          echo "PASSWORD=$password" >> $env:GITHUB_ENV
           Set-Content "$env:GITHUB_WORKSPACE/rdp.txt" "User: rdpuser`nPass: $password"
 
-      - name: Install Tailscale
+      - name: Install Ngrok
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-full-1.90.9.exe"
-          $output = "$env:TEMP\tailscale.exe"
-          Invoke-WebRequest -Uri $url -OutFile $output
-          Start-Process -FilePath $output -ArgumentList "/S" -Wait
+          iwr https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+          Expand-Archive ngrok.zip -DestinationPath $env:TEMP
+          Move-Item "$env:TEMP\ngrok.exe" "$env:ProgramFiles\ngrok.exe"
 
-      - name: Connect Tailscale
+      - name: Authenticate Ngrok
         env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          NGROK_AUTH: ${{ secrets.NGROK_AUTH }}
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --hostname=github-rdp
-          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "RDP READY!"
-          Write-Host "TAILSCALE IP: $ip"
-          Write-Host "User: rdpuser"
-          Write-Host "Pass: Gh@2026RDP!Secure123"
+          & "$env:ProgramFiles\ngrok.exe" authtoken $env:NGROK_AUTH
 
-      - name: Upload Credentials
+      - name: Start Ngrok TCP Tunnel
+        run: |
+          Start-Process -NoNewWindow -FilePath "$env:ProgramFiles\ngrok.exe" -ArgumentList "tcp 3389" 
+          Start-Sleep -Seconds 10
+          $log = & "$env:ProgramFiles\ngrok.exe" http 404 2>&1
+          Write-Host "Ngrok should be running"
+
+      - name: Upload RDP Info
         uses: actions/upload-artifact@v4
         with:
           name: rdp-info
           path: rdp.txt
-
-      - name: Keep Runner Alive
-        run: |
-          while ($true) { Start-Sleep -Seconds 300 }
