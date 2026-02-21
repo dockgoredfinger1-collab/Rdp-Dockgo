@@ -5,7 +5,7 @@ on: [workflow_dispatch]
 jobs:
   rdp:
     runs-on: windows-latest
-    timeout-minutes: 360  # Max 6 jam, aman
+    timeout-minutes: 360
 
     steps:
       - name: Enable RDP
@@ -17,7 +17,6 @@ jobs:
 
       - name: Create RDP User
         run: |
-          # Hapus user lama jika ada
           if (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue) {
               Remove-LocalUser -Name "rdpuser"
           }
@@ -45,7 +44,7 @@ jobs:
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
           Write-Host "RDP READY!"
-          Write-Host "IP (Tailscale): $ip"
+          Write-Host "TAILSCALE IP: $ip"
           Write-Host "User: rdpuser"
           Write-Host "Pass: Gh@2026RDP!Secure123"
 
